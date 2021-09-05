@@ -1,4 +1,3 @@
-
 import pygame
 import pygame.key
 import pygame.draw
@@ -14,795 +13,868 @@ from pygame.colordict import THECOLORS
 import os
 import sys
 import random
-from time import time
+import platform
 from PIL import Image
 from typing import Any, Callable, Dict, List, Union, Tuple
 
 
-class KindaType():
+class KType():
+    Pos2D = Union[Tuple[int, int], pygame.Vector2]
 
-    Position2D = Union[Tuple[int, int], pygame.Vector2]
+    class Float01(float):
+        def __new__(cls, x=1, *args, **kwargs):
+            obj = super(cls).__new__(cls, x, *args, **kwargs)
+            if obj < 0 or obj > 1:
+                raise ValueError("the value must be within [0,1]")
 
 
-class KindaEvent():
-
-    MUSIC_END = pygame.USEREVENT + 1
-    BG_CHANGE = pygame.USEREVENT + 2
-
-
-class KindaColor(pygame.Color):
-
-    def __init__(self, r: int, g: int, b: int, a: int = 255):
-        super(KindaColor, self).__init__(r, g, b, a)
+class KColor(pygame.Color):
+    def __init__(self, r:int, g:int, b:int, a:int):
+        super(KColor, self).__init__(r, g, b, a)
 
     @classmethod
-    def from_colordict(cls, name: str):
-        return cls(*THECOLORS[name])
+    def name(cls, clrname:str):
+        return cls(*THECOLORS[clrname])
 
     @classmethod
-    def random(cls, alpha: bool = False):
+    def random(cls, alpha:Union[int, None]=255):
         return cls(
-            random.randint(0, 255),
-            random.randint(0, 255),
-            random.randint(0, 255),
-            random.randint(0, 255) if alpha else 255
+            random.randint(0,255),
+            random.randint(0,255),
+            random.randint(0,255),
+            random.randint(0,255) if alpha==None else alpha
         )
 
     @classmethod
-    def random_binary(cls):
-        _val = random.randint(0, 255)
-        return cls(_val, _val, _val, 255)
+    def random_binary(cls, alpha:Union[int, None]=255):
+        _val = 255 * random.randint(0,1)
+        return cls(
+            _val, 
+            _val, 
+            _val, 
+            random.randint(0,255) if alpha==None else alpha
+        )
+
+    def invert(self, alpha:bool=False):        
+        return KColor(
+            255 - self.r,
+            255 - self.g,
+            255 - self.b,
+            255 - self.a if alpha else self.a
+        )
 
 
-class _KindaObject():
-
+class KObject():
     def __init__(
-        self,
-        surface: pygame.Surface,
-        position: KindaType.Position2D
-    ):
+        self, 
+        screen:pygame.Surface, 
+        surface:pygame.Surface,
+        position:KType.Pos2D
+        ):
+        self.screen = screen
         self.surface = surface
         self.rect = pygame.Rect(*position, *surface.get_size())
 
-    @classmethod
-    def _from_pyrect(cls, rect: pygame.Rect):
-        return cls(pygame.Surface(rect.size), rect.topleft)
+    def draw(self) -> None:
+        self.screen.blit(self.surface, self.rect)
 
-    def _copy_to(self, position: KindaType.Position2D):
-        return _KindaObject(self.surface, position)
+    def get_position(self) -> pygame.Vector2:
+        return pygame.Vector2(self.rect.topleft)
 
-    def draw(self, screen: pygame.Surface) -> None:
-        screen.blit(self.surface, self.rect)
-
-    def shift(self, dx: int, dy: int) -> None:
-        self.rect.move_ip(dx, dy)
-
-    def get_pos(self) -> pygame.Vector2:
-        return self.rect.topleft
-
-    def set_pos(self, position: KindaType.Position2D) -> None:
-        _shift = pygame.Vector2(position) - self.get_pos()
-        self.shift(*_shift)
+    def set_position(self, destination:Union[KType.Pos2D, None]) -> None:
+        self.rect.move_ip(
+            pygame.Vector2(destination) - self.get_position()
+        )
 
     def get_center(self) -> pygame.Vector2:
-        return self.rect.center
+        return pygame.Vector2(self.rect.center)
 
-    def set_center(self, position: KindaType.Position2D) -> None:
-        _shift = pygame.Vector2(position) - self.get_center()
-        self.shift(*_shift)
+    def set_center(self, destination:Union[KType.Pos2D, None]) -> None:
+        self.rect.move_ip(
+            pygame.Vector2(destination) - self.get_center()
+        )
 
     def is_enclosing(
         self,
-        position: KindaType.Position2D,
-        boundary=True
-    ) -> bool:
+        position:KType.Pos2D,
+        boundary:bool = True
+        ) -> bool:
         _x, _y = position
-        _xi, _xf = self.rect.left, self.rect.right
-        _yi, _yf = self.rect.top, self.rect.bottom
-        _hbnd = _x >= _xi and _x <= _xf if boundary else _x > _xi and _x < _xf
-        _vbnd = _y >= _yi and _y <= _yf if boundary else _y > _yi and _y < _yf
-        return _hbnd and _vbnd
-        
+        if boundary:
+            return _x >= self.rect.left and _x <= self.rect.right \
+                and _y >= self.rect.top and _y <= self.rect.bottom
+        else:
+            return _x > self.rect.left and _x < self.rect.right \
+                and _y > self.rect.top and _y < self.rect.bottom
 
-class KindaGIF(_KindaObject):
+    def copy(self, destination:Union[KType.Pos2D, None]):
+        newobj = KObject(
+            self.screen,
+            self.surface,
+            self.get_position() if destination is None else destination
+        )
+        return newobj
 
+
+class KGIF(KObject):
     def __init__(
-            self,
-            fpath: str,
-            period: int,
-            position: KindaType.Position2D):
-        _frames = list()
-
-        def add_pyimage(img: Image) -> None:
-            nonlocal _frames
+        self,
+        screen:pygame.Surface,
+        position:KType.Pos2D,
+        fpath:str = os.getcwd(),
+        Ts:int = 1
+        ):
+        self.frames = list()
+        self.cframe = 0
+        def add_pyimage(frames:list, img:Image) -> None:
             _img = img.convert('RGBA')
-            _frames.append(
+            frames.append(
                 pygame.image.fromstring(
                     _img.tobytes(),
                     _img.size,
                     _img.mode
                 ).convert_alpha()
             )
+            return
         with Image.open(fpath) as image:
-            add_pyimage(image)
+            add_pyimage(self.frames, image)
+            super(KGIF, self).__init__(screen, self.frames[0], position)
             while True:
                 try:
-                    image.seek(image.tell()+period)
+                    image.seek(image.tell()+Ts)
                 except EOFError:
                     break
                 else:
-                    add_pyimage(image)
-        self.frames = _frames
-        self.num_frames = len(_frames)
-        self.findex = 0
-        super(KindaGIF, self).__init__(
-            self.frames[self.findex],
-            position
-        )
-
-    def step(self, reversed=False) -> None:
-        if reversed:
-            _next = self.findex-1
-            self.findex = self.num_frames-1 if _next == -1 else _next
+                    add_pyimage(self.frames, image)
+                
+    def step(self, step:int=1, backward:bool=False) -> None:
+        if backward:
+            _next = self.cframe - step
+            self.cframe = _next if _next>=0 else len(self.frames) - 1
         else:
-            _next = self.findex+1
-            self.findex = 0 if _next == self.num_frames else _next
-        self.surface = self.frames[self.findex]
+            _next = self.cframe + step
+            self.cframe = _next if _next<len(self.frames) else 0
+        self.surface = self.frames[self.cframe]
+
+    def get(
+        self,
+        n:Union[int, None] = None,
+        position:Union[KType.Pos2D, None] = None
+        ) -> KObject:
+        _n = n if n is not None else self.cframe
+        _pos = position if position is not None else self.get_position()
+        return KObject(self.screen, self.frames[_n], _pos)
+
+    # Overridden
+    def copy(): pass
 
 
-
-class KindaBlock(_KindaObject):
-
+class KBlock(KObject):
     EMPTY = 0
     FILLED = 1
     DOTTED = 2
     CROSSED = 3
+    CHECKED = 4
 
     def __init__(
         self,
-        size: Tuple[int, int],
-        position: KindaType.Position2D,
-        dfcolor: KindaColor,
-        detect: bool = False,
-        inner_factor: float = 0.6
-    ) -> None:
-        super(KindaBlock, self).__init__(pygame.Surface(size), position)
-        self.dfcolor = dfcolor
-        self.surface.fill(dfcolor)
-        self.color = dfcolor
-        self.state = KindaBlock.EMPTY
-        self.detect = detect
-        self.inobj = _KindaObject._from_pyrect(
-            pygame.Rect(
-                *self.get_pos(),
-                *(inner_factor * pygame.Vector2(self.surface.get_size()))
-            )
+        screen:pygame.Surface,
+        size:Tuple[int, int],
+        position:KType.Pos2D,
+        color_default:KColor = KColor.name('white'),
+        clickable:bool = False,
+        inner_factor:KType.Float01 = 0.8
+        ):
+        super(KBlock, self).__init__(
+            screen, pygame.Surface(size), position
         )
-        self.inobj.set_center(self.get_center())
-        self.indot = _KindaObject._from_pyrect(
-            pygame.Rect(
-                *self.get_pos(),
-                *((1-inner_factor) * pygame.Vector2(self.surface.get_size()))
-            )
-        )
-        self.indot.set_center(self.get_center())
-        self.indot.surface.fill(KindaColor.from_colordict('black'))
-        self.infactor = inner_factor
-        self.incontent = None
-
-    def _set_color(self, color: KindaColor) -> None:
-        self.surface.fill(color)
-        self.color = color
-
-    def draw(self, screen:pygame.Surface) -> None:
-        super(KindaBlock, self).draw(screen)
-        if self.incontent != None:
-            self.incontent.draw(screen)
-        if self.state == KindaBlock.CROSSED:
-            _inrect = self.inobj.rect
-            pygame.draw.line(
-                screen,
-                KindaColor.from_colordict('black'),
-                _inrect.topleft,
-                _inrect.bottomright,
-                width=3
-            )
-            pygame.draw.line(
-                screen,
-                KindaColor.from_colordict('black'),
-                _inrect.bottomleft,
-                _inrect.topright,
-                width=3
-            )
-        elif self.state == KindaBlock.DOTTED:
-            self.indot.draw(screen)
-
-    def set_state(self, state: int, fill_color: Union[KindaColor, None] = None) -> None:
-        if state == KindaBlock.EMPTY:
-            self._set_color(self.dfcolor)
-        elif state == KindaBlock.FILLED:
-            self._set_color(fill_color)
-        elif state == KindaBlock.CROSSED or state == KindaBlock.DOTTED:
-            self._set_color(self.dfcolor)
-        self.state = state
-
-    def copy_to(self, position: KindaType.Position2D):
-        _obj = KindaBlock(
-            self.surface.get_size(),
-            position,
-            self.dfcolor,
-            self.detect,
-            self.infactor,
-        )
-        _obj._set_color(self.color)
-        _obj.set_state(self.state)
-        return _obj
-
-
-class KindaTextBlock(KindaBlock):
-
-    def __init__(
-        self,
-        text: str,
-        fsize: int,
-        size: Tuple[int, int],
-        position: KindaType.Position2D,
-        dfcolor: KindaColor,
-        detect: bool = True,
-        inner_factor: float = 0.6,
-    ) -> None:
-        super(KindaTextBlock, self).__init__(
-            size, position, dfcolor, detect, inner_factor
-        )
-        self.text = text
-        self.fsize = fsize
-        self.incontent = _KindaObject(
-            pygame.font.Font.render(
-                pygame.font.SysFont(
-                    pygame.font.get_default_font(),
-                    fsize
-                ),
-                text,
-                True,
-                KindaColor.from_colordict('black')
+        self.color_default = color_default
+        self.surface.fill(color_default)
+        self.color = color_default
+        self.state = KBlock.EMPTY
+        self.clickable = clickable
+        self.inner_factor = inner_factor
+        self.inner_cross = KObject(
+            screen,
+            pygame.Surface(
+                tuple(int(inner_factor*dim) for dim in size)
             ),
             position
         )
-        self.incontent.set_center(self.get_center())
-
-    def copy_to(self, position: KindaType.Position2D):
-        _obj = KindaTextBlock(
-            self.text,
-            self.fsize,
-            self.surface.get_size(),
-            position,
-            self.dfcolor,
-            self.detect,
-            self.infactor
+        self.inner_cross.set_center(self.get_center())
+        self.inner_dot = KObject(
+            screen,
+            pygame.Surface(
+                tuple(int((1-inner_factor)*dim) for dim in size)
+            ),
+            position
         )
-        _obj.incontent = self.incontent._copy_to((0,0))
-        _obj.incontent.set_center(_obj.get_center())
-        _obj._set_color(self.color)
-        _obj.set_state(self.state)
-        return _obj
+        self.inner_dot.set_center(self.get_center())
+        self.inner_object = None
 
-
-class KindaGrid(KindaBlock):
-
-    def __init__(self, origin_block: KindaBlock, num_blocks: Tuple[int, int]):
-        self.unit_block = origin_block
-        _wu, _hu = origin_block.surface.get_size()
-        _xu, _yu = _posu = origin_block.get_pos()
-        self.hnum, self.vnum = _hnum, _vnum = num_blocks
-        super(KindaGrid, self).__init__(
-            (_wu*_hnum, _hu*_vnum),
-            _posu,
-            origin_block.dfcolor,
-            origin_block.detect,
-            origin_block.infactor
-        )
-        self.units = [
-            [
-                origin_block.copy_to(
-                    (_xu+c*_wu, _yu+r*_hu)
-                ) for r in range(_vnum)
-            ] for c in range(_hnum)
-        ]
-        _borders = list()
-        _rectg = self.rect
-        _cnr_loop = _rectg.topleft, _rectg.topright, _rectg.bottomright, _rectg.bottomleft, _rectg.topleft
-        for i in range(len(_cnr_loop)-1):
-            _borders.append(
-                (
-                    pygame.Vector2(_cnr_loop[i]), 
-                    pygame.Vector2(_cnr_loop[i+1])
-                )
-            )
-        for r in range(1, _vnum):
-            _borders.append(((_xu, _yu+r*_hu), (_xu+_hnum*_wu, _yu+r*_hu)))
-        for c in range(1, _hnum):
-            _borders.append(((_xu+c*_wu, _yu), (_xu+c*_wu, _yu+_vnum*_hu)))
-        self.borders = _borders
-
-    def draw_borders(self, screen: pygame.Surface, width:int=2, inner=True) -> None:
-        for cnt, (i, f) in enumerate(self.borders):
-            if cnt == 4:
-                width = 1
-                if not inner:
-                    break
+    # Overridden
+    def draw(self, clr:Union[KColor, None]=None) -> None:
+        def clear():
+            self.color = self.color_default
+            self.surface.fill(self.color)
+            super(KBlock, self).draw()
+            if self.inner_object is not None:
+                self.inner_object.draw()
+            return
+        if self.state == KBlock.EMPTY:
+            clear()
+        elif self.state == KBlock.FILLED:
+            self.color = self.color if clr is None else clr 
+            self.surface.fill(self.color)
+            super(KBlock, self).draw()
+        elif self.state == KBlock.CROSSED:
+            clear()
+            _rect = self.inner_cross.rect
             pygame.draw.line(
-                screen, 
-                KindaColor.from_colordict('black'),
-                i, 
-                f, 
-                width = width
+                self.screen,
+                self.color_default if clr is None else clr,
+                _rect.topleft,
+                _rect.bottomright,
+                width = 3
+            )
+            pygame.draw.line(
+                self.screen,
+                self.color_default if clr is None else clr,
+                _rect.bottomleft,
+                _rect.topright,
+                width = 3
+            )
+        elif self.state == KBlock.DOTTED:
+            clear()
+            self.inner_dot.draw()
+        elif self.state == KBlock.CHECKED:
+            clear()
+            _rect = self.inner_cross.rect
+            pygame.draw.line(
+                self.screen,
+                self.color_default if clr is None else clr,
+                _rect.bottomleft,
+                _rect.topright
             )
 
-    def draw(self, screen:pygame.Surface, *indices:Tuple[int, int], border:bool=True) -> None:
-        for xi, yi in indices:
-            self.units[xi][yi].draw(screen)
-        if border:
-            self.draw_borders(screen)
+    # Overridden
+    def copy(self, destination:Union[KType.Pos2D, None]=None):
+        newobj = KBlock(
+            self.screen,
+            self.rect.size,
+            self.get_position() if destination is None else destination,
+            self.color_default,
+            self.clickable,
+            self.inner_factor
+        )
+        newobj.color = self.color
+        newobj.state = self.state
+        return newobj
 
-    def draw_all(self, screen:pygame.Surface, border:bool=True, inner=True) -> None:
-        for c in range(self.hnum):
-            for r in range(self.vnum):
-                self.units[c][r].draw(screen)
-        if border:
-            self.draw_borders(screen, inner=inner)
+
+class KTextBlock(KBlock):
+    def __init__(
+        self,
+        screen:pygame.Surface,
+        text:str,
+        font_size:int,
+        size:Tuple[int, int],
+        position:KType.Pos2D,
+        color_text:KColor = KColor.name('black'),
+        color_default:KColor = KColor.name('white'),
+        clickable:bool = False,
+        inner_factor:KType.Float01 = 0.8,
+        is_centered:bool = True
+        ):
+        super(KTextBlock, self).__init__(
+            screen, 
+            size, 
+            position, 
+            color_default, 
+            clickable, 
+            inner_factor
+        )
+        self.text = text
+        self.font_size = font_size
+        self.color_text = color_text
+        self.is_centered = is_centered
+        self.inner_object = KObject(
+            screen,
+            pygame.font.Font.render(
+                pygame.font.SysFont(
+                    pygame.font.get_default_font(),
+                    font_size
+                ),
+                text,
+                True,
+                color_text
+            ),
+            position
+        )
+        if is_centered:
+            self.inner_object.set_center(self.get_center())
+
+    # Overridden
+    def draw(self, clr:Union[KColor, None]=None) -> None:
+        if self.state == KBlock.FILLED:
+            raise ValueError("textblocks cannot have FILLED state")
+        super(KTextBlock, self).draw(clr)
+
+    # Overridden
+    def copy(self, destination:Union[KType.Pos2D, None]=None):
+        newobj = KTextBlock(
+            self.screen,
+            self.text,
+            self.font_size,
+            self.rect.size,
+            self.rect.topleft if destination is None else destination,
+            self.color_text,
+            self.color_default,
+            self.clickable,
+            self.inner_factor
+        )
+        newobj.color = self.color
+        newobj.state = self.state
+        return newobj
+
+
+class KGrid(KObject):
+    def __init__(
+        self,
+        unit_origin:KBlock,
+        num_blocks:Tuple[int, int]
+        ):
+        self.unit_origin = unit_origin
+        self.num_blocks = _hnum, _vnum = num_blocks
+        _wu, _hu = unit_origin.rect.size
+        _xu, _yu = _posu = unit_origin.get_position()
+        super(KGrid, self).__init__(
+            unit_origin.screen,
+            pygame.Surface((_wu*_hnum, _hu*_vnum)),
+            _posu,
+        )
+        self.unit_array = [[unit_origin.copy(
+            (_xu+c*_wu, _yu+r*_hu)
+        ) for r in range(_vnum)] for c in range(_hnum)]
+        _cnr_loop = (
+            self.rect.topleft,
+            self.rect.topright,
+            self.rect.bottomright,
+            self.rect.bottomleft,
+            self.rect.topleft
+        )
+        self.border_outer = list((
+            _cnr_loop[i], _cnr_loop[i+1]
+        ) for i in range(len(_cnr_loop)-1) )
+        self.border_inner = list()
+        for r in range(1, _vnum):
+            self.border_inner.append((
+                (_xu, _yu+r*_hu), (_xu+_hnum*_wu, _yu+r*_hu)
+            ))
+        for c in range(1, _hnum):
+            self.border_inner.append((
+                (_xu+c*_wu, _yu), (_xu+c*_wu, _yu+_vnum*_hu)
+            ))
+
+    def draw_borders(self, bdin:bool=True, bdout:bool=True) -> None:
+        if bdin:
+            for i, f in self.border_inner:
+                pygame.draw.line(
+                    self.screen, KColor.name('black'), i, f, 1
+                )
+        if bdout:
+            for i, f in self.border_outer:
+                pygame.draw.line(
+                    self.screen, KColor.name('black'), i, f, 3
+                )
+
+    # Overridden
+    def draw(
+        self,
+        *indices:Tuple[int, int],
+        bdin:bool = True,
+        bdout:bool = True
+        ):
+        for xi, yi in indices:
+            self.unit_array[xi][yi].draw()
+        self.draw_borders(bdin, bdout)
+
+    def draw_all(self, bdin:bool=True, bdout:bool=True) -> None:
+        _hnum, _vnum = self.num_blocks
+        for c in range(_hnum):
+            for r in range(_vnum):
+                self.unit_array[c][r].draw()
+        self.draw_borders(bdin, bdout)
 
     def replace(
-        self, 
-        *ind_val_det_tuples:Tuple[Tuple[int, int], Union[None, str, KindaColor], bool]
+        self,
+        *ind_block_tuples:Tuple[Tuple[int, int], KBlock]
         ) -> None:
-        for (xi, yi), val, detect in ind_val_det_tuples:
-            _block = self.units[xi][yi]
-            if type(val) == str:
-                _size = _block.surface.get_size()
-                self.units[xi][yi] = KindaTextBlock(
-                    val,
-                    min(_size),
-                    _size,
-                    _block.get_pos(),
-                    _block.dfcolor,
-                    detect
-                )
-            else:
-                self.units[xi][yi] = KindaBlock(
-                    _block.surface.get_size(),
-                    _block.get_pos(),
-                    val if type(val)==KindaColor else _block.dfcolor,
-                    detect
-                ) 
+        for (xi, yi), block in ind_block_tuples:
+            self.unit_array[xi][yi] = block
 
-    def block_index_at(self, position:KindaType.Position2D) -> Union[Tuple[int, int], None]:
-        if not self.is_enclosing(position, boundary=True):
+    def block_index_at(
+        self, 
+        position:KType.Pos2D
+        ) -> Union[Tuple[int, int], None]:
+        if not self.is_enclosing(position):
             return None
-        _xrel, _yrel = pygame.Vector2(position) - self.get_pos()
-        _w, _h = self.unit_block.surface.get_size()
+        _xrel, _yrel = pygame.Vector2(position)- self.get_position()
+        _w, _h = self.unit_origin.rect.size
         return int(_xrel//_w), int(_yrel//_h)
 
+    # Overridden
+    def set_position(): pass
 
-class KindaNonograms():
+    #Overridden
+    def set_center(): pass
 
-    CURRENT_MODE = 0
-    MAIN = "m"
-    HORIZONTAL = "h"
-    VERTICAL = "v"
-    IMAGE = "i"
+    # Overridden
+    def copy(): pass
+
+
+class KButton(KTextBlock):
+    def __init__(
+        self,
+        screen:pygame.Surface,
+        text:str,
+        size:Tuple[int, int],
+        position:KType.Pos2D,
+        color_text:KColor,
+        color_default:KColor,
+        on_pressed:Callable,
+        on_released:Union[Callable, None] = None,
+        color_bp:KColor = KColor.name('white'),
+        color_br:KColor = KColor.name('black')
+        ):
+        super(KButton, self).__init__(
+            screen,
+            text,
+            min(size),
+            size,
+            position,
+            color_text,
+            color_default,
+            clickable = True
+        )
+        self.on_pressed = on_pressed
+        self.on_released = on_released
+        self.is_pressed = False
+        self.color_bp = color_bp
+        self.color_br = color_br
+        _cnr_loop = (
+            self.rect.topleft,
+            self.rect.topright,
+            self.rect.bottomright,
+            self.rect.bottomleft,
+            self.rect.topleft
+        )
+        self.border = list((
+            _cnr_loop[i], _cnr_loop[i+1]
+        ) for i in range(len(_cnr_loop)-1) )      
+
+    # Overridden
+    def draw(self):
+        super(KButton, self).draw()
+        _clr = self.color_bp if self.is_pressed else self.color_br
+        for i, f in self.border:
+            pygame.draw.line(
+                self.surface, _clr, i, f, 3
+            )
+
+    def toggle(self, t_f:Union[bool, None]=None) -> None:
+        self.clickable = not self.clickable if t_f is None else t_f
+
+    def check(
+        self, 
+        mouse_position:KType.Pos2D, 
+        *args, **kwargs
+        ) -> Tuple[bool, Any]:
+        if not self.is_enclosing(mouse_position) or not self.clickable:
+            return False, None
+        _pressed = self.is_pressed
+        self.is_pressed = not _pressed and self.on_released is not None
+        onclick = self.on_released if _pressed else self.on_pressed
+        value = onclick(*args, **kwargs)
+        return True, value
+
+    def press(self, *args, **kwargs) -> Any:
+        self.is_pressed = self.on_released is not None
+        return self.on_pressed(*args, **kwargs)
+
+    def release(self, *args, **kwargs) -> Any:
+        if self.on_released is None:
+            raise NotImplementedError("the button has no on_released")
+        self.is_pressed = False
+        return self.on_released(*args, **kwargs)
+
+    # Overridden
+    def copy(): pass
+
+
+class KProgressBar(KObject):
+    def __init__(
+        self,
+        screen:pygame.Surface,
+        size:Tuple[int, int],
+        position:KType.Pos2D,
+        progress:KType.Float01 = 1,
+        color_bar:KColor = KColor.name('white'),
+        color_progress:KColor = KColor.name('black'),
+        color_pfg:KColor = KColor.name('black'),
+        color_pbg:KColor = KColor.name('white')
+        ):
+        super(KProgressBar, self).__init__(
+            screen, pygame.Surface(size), position
+        )
+        self.progress = progress
+        self.color_bar = color_bar
+        self.color_progress = color_progress
+        self.color_pfg = color_pfg
+        self.color_pbg = color_pbg
+        _w, _h = self.rect.size
+        _x, _y = position
+        _bw = _w-2*_h
+        self.bar = KBlock(screen, (_bw, _h), position, color_bar)
+        self.progress = KBlock(
+            screen, (int(progress*_bw), _h), position, color_progress
+        )
+        self.percent = KTextBlock(
+            screen, 
+            f"{str(int(progress*100))}%", 
+            _h,
+            (2*_h, _h),
+            (_x+_bw, _y),
+            color_pfg,
+            color_pbg
+        )
+
+    # Overridden
+    def draw(self) -> None:
+        self.bar.draw()
+        self.progress.draw()
+        self.percent.draw()
+
+    def set_progress(self, progress:KType.Float01) -> None:
+        _w, _h = self.rect.size
+        _x, _y = self.get_position()
+        _bw = self.bar.rect.size[0]
+        self.progress = KBlock(
+            self.screen, 
+            (int(progress*_bw), _h), 
+            self.get_position(), 
+            self.color_progress
+        )
+        self.percent = KTextBlock(
+            self.screen, 
+            f"{str(int(progress*100))}%", 
+            _h,
+            (2*_h, _h),
+            (_x+_bw, _y),
+            self.color_pfg,
+            self.color_pbg
+        )
+
+    # Overridden
+    def set_position(self, destination: Union[KType.Pos2D, None]) -> None:
+        _des = pygame.Vector2(destination)
+        _shift = _des - self.get_position()
+        super().set_position(_des)
+        self.bar.rect.move_ip(*_shift)
+        self.progress.rect.move_ip(*_shift)
+        self.percent.rect.move_ip(*_shift)
+
+    # Overridden
+    def set_center(self, destination: Union[KType.Pos2D, None]) -> None:
+        _des = pygame.Vector2(destination)
+        _shift = _des - self.get_center()
+        super().set_center(destination)
+        self.bar.rect.move_ip(*_shift)
+        self.progress.rect.move_ip(*_shift)
+        self.percent.rect.move_ip(*_shift)
+
+    # Overridden
+    def copy(): pass
+
+
+class KNonograms(KObject):
+    MAIN = 0
+    HORIZONTAL = 1
+    VERTICAL = 2
+    IMAGE = 3
 
     def __init__(
         self,
-        position:KindaType.Position2D,
+        screen:pygame.Surface,
+        position:KType.Pos2D,
         num_mainblocks:Tuple[int, int],
         num_numblocks:Tuple[int, int],
-        size_mainblock:Tuple[int, int],
-        color_mainblock:KindaColor,
-        color_numblock:KindaColor
+        size_mainblock:Tuple[int ,int],
+        color_mainblocks:KColor,
+        color_numblocks:KColor
         ):
         _szmw, _szmh = size_mainblock
-        _nbmw, _nbmh = pygame.Vector2(num_mainblocks)
-        _nbh, _nbv = pygame.Vector2(num_numblocks)
-        _xi, _yi = _ipos = pygame.Vector2(position)
-        _iw, _ih = _mshift = _nbv*_szmw, _nbh*_szmh
+        _nbmw, _nbmh = num_mainblocks
+        _nbh, _nbv = num_numblocks
+        _iw, _ih = _mshift = pygame.Vector2(_nbv*_szmw, _nbh*_szmh)
         if _iw%_nbmw!=0 or _ih%_nbmh!=0:
             raise Exception("Cannot initialize the image grid")
+        super(KNonograms, self).__init__(
+            screen,
+            pygame.Surface((_iw+_nbmw*_szmw, _ih+_nbmh*_szmh)),
+            position
+        )
+        _xi, _yi = self.get_position()
         self.grids = {
-            KindaNonograms.MAIN: KindaGrid(
-                KindaBlock(
+            KNonograms.MAIN: KGrid(
+                KBlock(
+                    screen = screen,
                     size = size_mainblock,
-                    position = _ipos + _mshift,
-                    dfcolor = color_mainblock,
-                    detect = True
+                    position = _mshift + self.get_position(),
+                    color_default = color_mainblocks,
+                    clickable = True
                 ),
                 num_blocks = num_mainblocks
             ),
-            KindaNonograms.HORIZONTAL: KindaGrid(
-                KindaBlock(
+            KNonograms.HORIZONTAL: KGrid(
+                KBlock(
+                    screen = screen,
                     size = size_mainblock,
                     position = ( int(_xi+_iw) , int(_yi) ),
-                    dfcolor = color_numblock,
-                    detect = False
+                    color_default = color_numblocks,
+                    clickable = False
                 ),
                 num_blocks = ( int(_nbmw) , int(_nbh) )
             ),
-            KindaNonograms.VERTICAL: KindaGrid(
-                KindaBlock(
+            KNonograms.VERTICAL: KGrid(
+                KBlock(
+                    screen = screen,
                     size = size_mainblock,
                     position = ( int(_xi), int(_yi+_ih) ),
-                    dfcolor = color_numblock,
-                    detect = False
+                    color_default = color_numblocks,
+                    clickable = False
                 ),
                 num_blocks = ( int(_nbv) , int(_nbmh) )
             ),
-            KindaNonograms.IMAGE: KindaGrid(
-                KindaBlock(
+            KNonograms.IMAGE: KGrid(
+                KBlock(
+                    screen = screen,
                     size = ( int(_iw//_nbmw), int(_ih//_nbmh) ),
-                    position = _ipos,
-                    dfcolor = color_mainblock,
-                    detect = False
+                    position = self.get_position(),
+                    color_default = color_mainblocks,
+                    clickable = False
                 ),
                 num_blocks = num_mainblocks
             )
         }
         self.history = list()
 
-    def register(self, grid:str, numbers:Dict[int, List[int]]):
-        _g = self.grids[grid]
-        if grid == KindaNonograms.HORIZONTAL:
-            for line, nlist in numbers.items():
-                _maxlvl = _g.vnum - 1
-                nlist.reverse()
-                for level, num in enumerate(nlist):
-                    _g.replace(
-                        ( (line, _maxlvl-level) , str(num), True ) 
+    # Overridden
+    def draw(self, *gnums:int) -> None:
+        for gnum in gnums:
+            self.grids[gnum].draw_all()
+
+    # Overridden
+    def draw_all(self) -> None:
+        for grid in self.grids.values():
+            grid.draw_all()
+
+    def register_h(
+        self, 
+        line_numbers_dict:Dict[int, List[int]]
+        ) -> None:
+        _g = self.grids[KNonograms.HORIZONTAL]
+        _gu = _g.unit_origin
+        _maxlvl = _g.num_blocks[1] - 1
+        for line, nlist in line_numbers_dict.items():
+            for level, num in enumerate(nlist[::-1]):
+                _g.replace((
+                    (line, _maxlvl-level),
+                    KTextBlock(
+                        _g.screen,
+                        str(num),
+                        min(_gu.rect.size),
+                        _gu.rect.size,
+                        _gu.get_position(),
+                        _gu.color_default,
+                        clickable = True
                     )
-        elif grid == KindaNonograms.VERTICAL:
-            for line, nlist in numbers.items():
-                _maxlvl = _g.hnum - 1
-                nlist.reverse()
-                for level, num in enumerate(nlist):
-                    _g.replace(
-                        ( (_maxlvl-level, line) , str(num), True ) 
+                ))
+
+    def register_v(
+        self, 
+        line_numbers_dict:Dict[int, List[int]]
+        ) -> None:
+        _g = self.grids[KNonograms.VERTICAL]
+        _gu = _g.unit_origin
+        _maxlvl = _g.num_blocks[0] - 1
+        for line, nlist in line_numbers_dict.items():
+            for level, num in enumerate(nlist[::-1]):
+                _g.replace((
+                    (_maxlvl-level, line),
+                    KTextBlock(
+                        _g.screen,
+                        str(num),
+                        min(_gu.rect.size),
+                        _gu.rect.size,
+                        _gu.get_position(),
+                        _gu.color_default,
+                        clickable = True
                     )
-            
-    def reset(self, screen:pygame.Surface) -> None:
+                ))
+
+    def record():
+        pass
+
+    def reset(self) -> None:
         for key, grid in self.grids.items():
-            for r in range(grid.hnum):
-                for c in range(grid.vnum):
-                    grid.units[r][c].set_state(KindaBlock.EMPTY)
-                    grid.units[r][c].draw(screen)
-            grid.draw_borders(screen, inner=not key==KindaNonograms.IMAGE)
+            _hnum, _vnum = grid.num_blocks
+            for c in range(_hnum):
+                for r in range(_vnum):
+                    grid.unit_array[c][r].state = KBlock.EMPTY
+            grid.draw_all(bdin=not key==KNonograms.IMAGE)
 
-    def record(self) -> None:
+    def undo():
         pass
 
-    def undo(self) -> None:
+    def redo():
         pass
 
-    def redo(self) -> None:
+    def restart():
         pass
 
-    def restart(self) -> None:
-        pass
+    # Overridden
+    def set_position(): pass
+
+    # Overridden
+    def set_center(): pass
+
+    # Overridden
+    def copy(): pass
 
 
-class KindaWindow():
+class KWindow():
+    MUSIC_END = pygame.USEREVENT + 1
+    BG_CHANGE = pygame.USEREVENT + 2
 
-    INITIALIZED = False
-    EXIT = 'nomoreoptscuzreasons'
+    EXIT = 'exit'
+    _INITIALIZED = False
+    _WINCOUNT = 0
 
-    screen: pygame.Surface
-
-    @classmethod
-    def init(cls):
+    def __init__(
+        self, 
+        screen_size:Union[Tuple[int, int], None] = None, 
+        color_bgdf:KColor = KColor.name('white'),
+        current_page:str = "start_menu",
+        fps:int = 30
+        ):
         pygame.init()
-        pygame.display.set_caption("KindaNonograms (by KindaOP)")
-        cls.screen = pygame.display.set_mode((950, 950))
-        cls.screen.fill(KindaColor.from_colordict('white'))
-        cls.INITIALIZED = True
-        _icon = pygame.Surface((32, 32))
-        icon_grid = KindaGrid(
-            KindaBlock(
+        pygame.font.init()
+        if screen_size is not None:
+            self.screen_size = screen_size
+        else:
+            _system = platform.system()
+            if _system == 'Linux':
+                self.screen_size = (950, 950)
+            elif _system == 'Windows':
+                raise OSError("Windows sucks :P")
+            else:
+                raise OSError("program not supported by the OS")
+        self.color_bgdf = color_bgdf
+        self.current_page = current_page
+        self.clock = pygame.time.Clock()
+        self.fps = fps
+        self.screen = pygame.display.set_mode(self.screen_size)
+        self.screen.fill(color_bgdf)
+        _icon = pygame.Surface((32,32))
+        icon_grid = KGrid(
+            KBlock(
+                _icon,
                 (8, 8),
                 (0, 0),
-                KindaColor.from_colordict('black'),
-                detect = False
+                KColor.name('black'),
+                clickable = False
             ),
             (4, 4)
         )
-        icon_grid.replace(
-            ( (0,0) , KindaColor.from_colordict('white') , False ),
-            ( (1,1) , KindaColor.from_colordict('white') , False ),
-            ( (2,3) , KindaColor.from_colordict('red') , False ),
-            ( (3,3) , KindaColor.from_colordict('green') , False ),
-            ( (3,2) , KindaColor.from_colordict('blue') , False )
+        replace_color = lambda obj, *ind_clrname_tuple: obj.replace(
+            *tuple((
+                (xi, yi),
+                KBlock(
+                    obj.screen,
+                    obj.unit_array[xi][yi].rect.size,
+                    obj.unit_array[xi][yi].get_position(),
+                    clrname
+                )) for (xi, yi), clrname in ind_clrname_tuple
+            ) 
         )
-        icon_grid.draw_all(_icon)
+        replace_color(
+            icon_grid,
+            ( (0,0) , 'white' ),
+            ( (1,1) , 'white' ),
+            ( (2,3) , 'red' ),
+            ( (3,3) , 'green' ),
+            ( (3,2) , 'blue' )
+        )
+        icon_grid.draw_all()
         pygame.display.set_icon(_icon)
+        KWindow._INITIALIZED = True
+        KWindow._WINCOUNT += 1
 
-    @classmethod
-    def exit(cls):
-        pygame.mixer.music.stop()
-        pygame.mixer.music.unload()
-        sys.exit()
+    def __del__(self):
+        KWindow._WINCOUNT -= 1
+        if KWindow._WINCOUNT == 0:
+            # pygame.mixer.music.stop()
+            # pygame.mixer.music.unload()
+            print("Thank You for Playing My Game! - KindaOP")
 
-    def timer(ms: int) -> Callable:
-        def timed_func(f) -> Callable:
-            def loop(*args: Any, **kwargs: Any) -> None:
-                end_time = time() + ms/1000
-                finished = None
-                finished = f(*args, **kwargs)
-                while time() < end_time and finished == None:
-                    pass
-            return loop
-        return timed_func
-
-    def subpages(**subpages: Callable) -> Callable:
-        def loop(f: Callable) -> Callable:
-            def func(*args: Any, **kwargs: Any) -> None:
-                while KindaWindow.INITIALIZED:
-                    key = f(*args, **kwargs)
-                    if key not in subpages.keys():
-                        break
-                    subpages[key]()
-            return func
-        return loop
-
-    @classmethod
-    @timer(7000)
-    def closing_window(cls, *args, **kwargs) -> None:
-        pygame.mixer.music.stop()
-        pygame.mixer.music.unload()
-        pygame.mixer.music.load(
-            os.path.join(os.getcwd(), "Sounds", "closing.ogg")
+    def opening_window(self) -> None:
+        print("opening_window")
+        opening_gif = KGIF(
+            self.screen, 
+            (100, 100),
+            os.path.join(os.getcwd(), "Images", "interesting.gif"),
+            Ts = 1
         )
-        pygame.mixer.music.play(loops=0)
-        cls.screen.fill(KindaColor.from_colordict('blue'))
-        pygame.display.flip()
-
-    @classmethod
-    def exit_prompt(cls, *args, **kwargs) -> str:
-        pass
-
-    @classmethod
-    def import_game(cls, *args, **kwargs) -> str:
-        pass
-
-    @classmethod
-    def history_window(cls, *args, **kwargs) -> str:
-        return input("history: ")
-
-    @classmethod
-    def puzzle_window(cls, *args, **kwargs) -> str:
-        buttons = {
-            "fill": KindaGrid(
-                KindaTextBlock(
-                    "FILL",
-                    50,
-                    (150, 50),
-                    (25, 25),
-                    KindaColor.from_colordict('orange'),
-                    detect = True
-                ),
-                (1, 1)
-            ),
-            "cross": KindaGrid(
-                KindaTextBlock(
-                    "CROSS",
-                    50,
-                    (150, 50),
-                    (200, 25),
-                    KindaColor.from_colordict('orange'),
-                    detect = True
-                ),
-                (1, 1)
-            ),
-            "dot": KindaGrid(
-                KindaTextBlock(
-                    "DOT",
-                    50,
-                    (150, 50),
-                    (375, 25),
-                    KindaColor.from_colordict('orange'),
-                    detect = True
-                ),
-                (1, 1)
-            ),
-            "clear": KindaGrid(
-                KindaTextBlock(
-                    "CLEAR",
-                    50,
-                    (150, 50),
-                    (550, 25),
-                    KindaColor.from_colordict('orange'),
-                    detect = True
-                ),
-                (1, 1)
-            ),
-            "reset": KindaGrid(
-                KindaTextBlock(
-                    "RESET",
-                    50,
-                    (150, 50),
-                    (725, 25),
-                    KindaColor.from_colordict('orange'),
-                    detect = True
-                ),
-                (1, 1)
-            )
-        }
-
-        nng = KindaNonograms(
-            position = (100, 100),
-            num_mainblocks = (25, 25),
-            num_numblocks = (7, 7),
-            size_mainblock = (25, 25),
-            color_mainblock = KindaColor.from_colordict('white'),
-            color_numblock = KindaColor.from_colordict('yellow')
+        pbar = KProgressBar(
+            self.screen,
+            (850, 50),
+            (50, 850),
+            progress = 0,
+            color_pbg = self.color_bgdf
         )
-
-        nng.register(
-            KindaNonograms.HORIZONTAL,
-            {
-                0: [2],
-                1: [1, 3],
-                2: [2, 4],
-                3: [2, 3, 1],
-                4: [3, 2, 1],
-                5: [4, 6, 6],
-                6: [9, 3, 5],
-                7: [15, 3, 1],
-                8: [11, 3, 4],
-                9: [5, 8, 3],
-                10: [4, 3, 3, 1, 1],
-                11: [2, 5, 3, 3],
-                12: [6, 2, 3, 3],
-                13: [2, 5, 2, 3, 3, 1, 1],
-                14: [2, 5, 4, 3, 3],
-                15: [1, 3, 1, 3, 3],
-                16: [2, 7, 4, 1, 1],
-                17: [15, 2, 1],
-                18: [4, 3, 3, 4],
-                19: [3, 6, 5],
-                20: [2, 2, 2],
-                21: [2, 2, 1],
-                22: [1, 3, 1],
-                23: [1, 4],
-                24: [3]
-            }
-        )
-        nng.register(
-            KindaNonograms.VERTICAL,
-            {
-                0: [1],
-                1: [3],
-                2: [5, 2],
-                3: [7, 1, 5],
-                4: [6, 1, 5],
-                5: [6, 2, 4],
-                6: [5, 7],
-                7: [13],
-                8: [12],
-                9: [4, 2, 2],
-                10: [4, 1, 3],
-                11: [5, 9],
-                12: [1, 5, 2, 3],
-                13: [1, 5, 1, 1, 1],
-                14: [3, 6, 1, 1],
-                15: [2, 1, 3, 4],
-                16: [4, 4],
-                17: [12],
-                18: [10],
-                19: [1, 6, 1],
-                20: [5, 4],
-                21: [7, 3, 3],
-                22: [3, 15, 3],
-                23: [3, 2, 2, 2, 2, 3, 2],
-                24: [25]
-            }
-        )
-
-        for button in buttons.values():
-            button.draw_all(cls.screen, border=False)
-        for key, grid in nng.grids.items():
-            grid.draw_all(cls.screen, border=True, inner=not key==KindaNonograms.IMAGE)
-
-        is_staying = True
-        while is_staying:
+        n_frames = len(opening_gif.frames)
+        for i in range(n_frames):
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
-                    is_staying = False
-                elif event.type == pygame.MOUSEBUTTONDOWN:
-                    mouse_pos = pygame.mouse.get_pos()
-                    for key, button in buttons.items():
-                        b = button.block_index_at(mouse_pos)
-                        if b!= None:
-                            if key == "fill":
-                                KindaNonograms.CURRENT_MODE = KindaBlock.FILLED
-                            elif key == "cross":
-                                KindaNonograms.CURRENT_MODE = KindaBlock.CROSSED
-                            elif key == "dot":
-                                KindaNonograms.CURRENT_MODE = KindaBlock.DOTTED
-                            elif key == "clear":        
-                                KindaNonograms.CURRENT_MODE = KindaBlock.EMPTY
-                            elif key == "reset":
-                                nng.reset(cls.screen)
-                            button.draw_borders(cls.screen, width=5)
-                            continue
-                        button.draw_all(cls.screen, border=False)
-                    for key, grid in nng.grids.items():
-                        b = grid.block_index_at(mouse_pos)
-                        if b != None:
-                            xi, yi = b
-                            if key == KindaNonograms.MAIN:
-                                main = grid.units[xi][yi]
-                                img = nng.grids[KindaNonograms.IMAGE].units[xi][yi]
-                                if main.state == KindaNonograms.CURRENT_MODE:
-                                    main.set_state(KindaBlock.EMPTY)
-                                    img.set_state(KindaBlock.EMPTY)
-                                else:
-                                    main.set_state(KindaNonograms.CURRENT_MODE, KindaColor.from_colordict('black'))
-                                    _imgmode = KindaBlock.EMPTY if KindaNonograms.CURRENT_MODE != KindaBlock.FILLED else KindaNonograms.CURRENT_MODE
-                                    img.set_state(_imgmode, KindaColor.from_colordict('black'))
-                                main.draw(cls.screen)
-                                img.draw(cls.screen)
-                            elif key == KindaNonograms.HORIZONTAL or key == KindaNonograms.VERTICAL:
-                                nblock = nng.grids[key].units[xi][yi]
-                                _nummode = KindaBlock.CROSSED if nblock.state != KindaBlock.CROSSED else KindaBlock.EMPTY
-                                nblock.set_state(_nummode)
-                                nblock.draw(cls.screen)
-                        grid.draw_borders(cls.screen, inner=not key==KindaNonograms.IMAGE)
-                        
-                pygame.display.flip()
+                    sys.exit()
+            self.clock.tick(self.fps)
+            pbar.set_progress((i+1)/n_frames)
+            pbar.draw()
+            opening_gif.draw()
+            opening_gif.step()
+            pygame.display.flip()
+            pygame.time.delay(50)
+        pygame.time.delay(1000)
 
-    @classmethod
-    def tutorial_window(cls, *args, **kwargs) -> str:
-        pass
-
-    @classmethod
-    @subpages(
-        opt1=puzzle_window
-    )
-    def puzzle_menu(cls, *args, **kwargs) -> str:
-        return input("puzzle menu: ")
-
-    @classmethod
-    @subpages(
-        opt1=puzzle_menu,
-        opt2=history_window,
-        opt3=import_game
-    )
-    def start_menu(cls, *args, **kwargs) -> str:
+    def start_menu(self):
+        print("start_menu")
+        self.clock.tick(self.fps)
+        pygame.mixer.music.stop()
+        pygame.mixer.music.unload()
         pygame.mixer.music.load(
             os.path.join(os.getcwd(), "Sounds", "opening.ogg")
         )
         pygame.mixer.music.play(loops=0)
-        pygame.mixer.music.set_endevent(KindaEvent.MUSIC_END)
-
-
-        buttons = {
-            "puzzle": KindaGrid(
-                KindaTextBlock(
-                    "PUZZLE",
-                    50,
-                    (300, 50),
-                    (100, 100),
-                    KindaColor.random(),
-                    detect = True
-                ),
-                (1, 1)
-            )
-        }
-        cls.screen.fill(KindaColor.random())
-        pygame.time.set_timer(KindaEvent.BG_CHANGE, millis=200, loops=5)
-        
-        is_staying = True
-        while is_staying:
+        pygame.mixer.music.set_endevent(KWindow.MUSIC_END)
+        self.screen.fill(KColor.random())
+        pygame.time.set_timer(KWindow.BG_CHANGE, millis=200, loops=5)
+        target_page = str()
+        while not target_page:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
-                    is_staying = False
-                elif event.type == KindaEvent.MUSIC_END:
+                    target_page = KWindow.EXIT
+                elif event.type == KWindow.MUSIC_END:
                     pygame.mixer.music.stop()
                     pygame.mixer.music.unload()
                     pygame.mixer.music.load(
@@ -810,43 +882,116 @@ class KindaWindow():
                     )
                     pygame.mixer.music.play(loops=-1)
                     pygame.mixer.music.set_endevent()
-                    for _, button in buttons.items():
-                        button.draw_all(cls.screen)
-                elif event.type == KindaEvent.BG_CHANGE:
-                    cls.screen.fill(KindaColor.random())
-
+                elif event.type == KWindow.BG_CHANGE:
+                    self.screen.fill(KColor.random())
                 elif event.type == pygame.MOUSEBUTTONDOWN:
-                    b = button.block_index_at(pygame.mouse.get_pos())
-                    print(b)
-                    if b != None:
-                        return "optlol"
-                
-                pygame.display.flip()
-        pygame.time.set_timer(KindaEvent.BG_CHANGE, 0)
-
-    @classmethod
-    def opening_window(cls, *args, **kwargs) -> None:
-        opening_gif = KindaGIF(
-            os.path.join(os.getcwd(), "Images", "interesting.gif"),
-            period = 1,
-            position = (100, 100)
-        )
-        # pbar = Block((400, 100), (100, 700),
-        #              dfcolor=THECOLORS['red'], interactable=True)
-        for i in range(100):
-            opening_gif.step(reversed=True)
-            opening_gif.draw(cls.screen)
+                    target_page = "start_game"
             pygame.display.flip()
-            pygame.time.delay(70)
+        return target_page
+
+
+    def start_game(self):
+        print("start_game")
+        self.screen.fill(self.color_bgdf)
+        nng = KNonograms(
+            self.screen,
+            position = (100, 100),
+            num_mainblocks = (25, 25),
+            num_numblocks = (7, 7),
+            size_mainblock = (25, 25),
+            color_mainblocks = KColor.name('white'),
+            color_numblocks = KColor.name('yellow')
+        )
+        button = KButton(
+            self.screen,
+            "Return",
+            (100, 50),
+            (25, 25),
+            KColor.name('violet'),
+            KColor.name('green'),
+            on_pressed = lambda: "start_menu",
+            on_released = None,
+        )
+        button.draw()
+        nng.draw_all()
+        target_page = str()
+        while not target_page:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    target_page = KWindow.EXIT
+                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    _mpos = pygame.mouse.get_pos()
+                    checked, target_page = button.check(_mpos)
+                    if checked:
+                        continue
+                    for key, grid in nng.grids.items():
+                        ind = grid.block_index_at(_mpos)
+                        if ind is not None:
+                            print(ind)
+                            break
+                        
+            pygame.display.flip()
+        return target_page
+
+    def history(self):
+        print("history")
+        target_page = str()
+        while not target_page:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    target_page == "closing_window"
+            pygame.display.flip()
+        return target_page
+
+    def import_game(self):
+        print("import_game")
+        target_page = str()
+        while not target_page:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    target_page == "closing_window"
+            pygame.display.flip()
+        return target_page
+
+    def exit_prompt():
+        print("exit_prompt")
+        target_page = str()
+        while not target_page:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    target_page == KWindow.EXIT
+            pygame.display.flip()
+        return target_page
+
+    def closing_window(self) -> None:
+        print("closing_window")
+        pygame.mixer.music.stop()
+        pygame.mixer.music.unload()
+        pygame.mixer.music.load(
+            os.path.join(os.getcwd(), "Sounds", "closing.ogg")
+        )
+        pygame.mixer.music.play(loops=0)
+        pygame.mixer.music.set_endevent(KWindow.MUSIC_END)
+        is_staying = True
+        while is_staying:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    is_staying = False
+                elif event.type == KWindow.MUSIC_END:
+                    is_staying = False
+
+    def run(self) -> None:
+        self.opening_window()
+        while self.current_page != KWindow.EXIT:
+            self.current_page = eval(
+                "".join(["self.", self.current_page, "()"])
+            )
+        self.closing_window()
 
 
 def main():
-    KindaWindow.init()
-    KindaWindow.opening_window()
-    KindaWindow.start_menu()
-    KindaWindow.puzzle_window()
-    KindaWindow.closing_window()
-    KindaWindow.exit()
+    KWindow().run()
 
-if __name__ == "__main__":
+
+if __name__ == '__main__':
     main()
