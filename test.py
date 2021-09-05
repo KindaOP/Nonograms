@@ -258,6 +258,18 @@ class KBlock(KObject):
             )
 
     # Overridden
+    def set_position(self, destination: Union[KType.Pos2D, None]) -> None:
+        super(KBlock, self).set_position(destination)
+        self.inner_cross.set_position(destination)
+        self.inner_dot.set_position(destination)
+
+    # Overridden
+    def set_center(self, destination: Union[KType.Pos2D, None]) -> None:
+        super(KBlock, self).set_center(destination)
+        self.inner_cross.set_center(destination)
+        self.inner_dot.set_center(destination)
+
+    # Overridden
     def copy(self, destination:Union[KType.Pos2D, None]=None):
         newobj = KBlock(
             self.screen,
@@ -319,6 +331,22 @@ class KTextBlock(KBlock):
         if self.state == KBlock.FILLED:
             raise ValueError("textblocks cannot have FILLED state")
         super(KTextBlock, self).draw(clr)
+
+    # Overridden
+    def set_position(self, destination: Union[KType.Pos2D, None]) -> None:
+        super(KTextBlock, self).set_position(destination)
+        if self.is_centered:
+            self.inner_object.set_center(self.get_center())
+        else:
+            self.inner_object.set_position(self.get_position())
+
+    # Overridden
+    def set_center(self, destination: Union[KType.Pos2D, None]) -> None:
+        super(KTextBlock, self).set_center(destination)
+        if self.is_centered:
+            self.inner_object.set_center(self.get_center())
+        else:
+            self.inner_object.set_position(self.get_position())
 
     # Overridden
     def copy(self, destination:Union[KType.Pos2D, None]=None):
@@ -491,7 +519,7 @@ class KButton(KTextBlock):
         *args, **kwargs
         ) -> Tuple[bool, Any]:
         if not self.is_enclosing(mouse_position) or not self.clickable:
-            return False, None
+            return False, str()
         _pressed = self.is_pressed
         self.is_pressed = not _pressed and self.on_released is not None
         onclick = self.on_released if _pressed else self.on_pressed
@@ -744,12 +772,6 @@ class KNonograms(KObject):
         pass
 
     # Overridden
-    def set_position(): pass
-
-    # Overridden
-    def set_center(): pass
-
-    # Overridden
     def copy(): pass
 
 
@@ -759,6 +781,7 @@ class KWindow():
 
     EXIT = 'exit'
     _INITIALIZED = False
+    _PREVPAGE = None
     _WINCOUNT = 0
 
     def __init__(
@@ -824,8 +847,10 @@ class KWindow():
     def __del__(self):
         KWindow._WINCOUNT -= 1
         if KWindow._WINCOUNT == 0:
-            # pygame.mixer.music.stop()
-            # pygame.mixer.music.unload()
+            pygame.mixer.music.stop()
+            pygame.mixer.music.unload()
+            pygame.font.quit()
+            pygame.quit()
             print("Thank You for Playing My Game! - KindaOP")
 
     def opening_window(self) -> None:
@@ -845,17 +870,17 @@ class KWindow():
         )
         n_frames = len(opening_gif.frames)
         for i in range(n_frames):
+            self.clock.tick(self.fps)
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     sys.exit()
-            self.clock.tick(self.fps)
             pbar.set_progress((i+1)/n_frames)
             pbar.draw()
             opening_gif.draw()
             opening_gif.step()
             pygame.display.flip()
             pygame.time.delay(50)
-        pygame.time.delay(1000)
+        pygame.time.delay(500)
 
     def start_menu(self):
         print("start_menu")
@@ -871,9 +896,11 @@ class KWindow():
         pygame.time.set_timer(KWindow.BG_CHANGE, millis=200, loops=5)
         target_page = str()
         while not target_page:
+            self.clock.tick(self.fps)
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
-                    target_page = KWindow.EXIT
+                    target_page = "exit_prompt"
+                    KWindow._PREVPAGE = "start_menu"
                 elif event.type == KWindow.MUSIC_END:
                     pygame.mixer.music.stop()
                     pygame.mixer.music.unload()
@@ -916,9 +943,11 @@ class KWindow():
         nng.draw_all()
         target_page = str()
         while not target_page:
+            self.clock.tick(self.fps)
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
-                    target_page = KWindow.EXIT
+                    target_page = "exit_prompt"
+                    KWindow._PREVPAGE = "start_menu"
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     _mpos = pygame.mouse.get_pos()
                     checked, target_page = button.check(_mpos)
@@ -937,9 +966,11 @@ class KWindow():
         print("history")
         target_page = str()
         while not target_page:
+            self.clock.tick(self.fps)
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
-                    target_page == "closing_window"
+                    target_page == "exit_prompt"
+                    KWindow._PREVPAGE = "history"
             pygame.display.flip()
         return target_page
 
@@ -947,20 +978,74 @@ class KWindow():
         print("import_game")
         target_page = str()
         while not target_page:
+            self.clock.tick(self.fps)
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
-                    target_page == "closing_window"
+                    target_page == "exit_prompt"
+                    KWindow._PREVPAGE = "import_game"
             pygame.display.flip()
         return target_page
 
-    def exit_prompt():
+    def exit_prompt(self):
         print("exit_prompt")
+        popup = KTextBlock(
+            self.screen,
+            " Are you sure? ",
+            90,
+            (450, 250),
+            (0, 0),
+            is_centered = False
+        )
+        popup.set_center(self.screen.get_rect().center)
+        popup.inner_object.rect.move_ip(0, 10)
+        popup.surface.set_alpha(128)
+        button_y = KButton(
+            self.screen,
+            "Yes",
+            (150, 50),
+            popup.get_position(),
+            KColor.name('black'),
+            KColor.name('white'),
+            on_pressed = lambda: KWindow.EXIT,
+            on_released = None,
+        )
+        button_y.set_position((
+            popup.get_position() + pygame.Vector2(30, 170)
+        ))
+        button_n = KButton(
+            self.screen,
+            "No",
+            (150, 50),
+            popup.get_position(),
+            KColor.name('black'),
+            KColor.name('white'),
+            on_pressed = lambda: KWindow._PREVPAGE,
+            on_released = None
+        )
+        button_n.set_position((
+            popup.get_position() + pygame.Vector2(270, 170)
+        ))
+        popup_buttons = button_y, button_n
+        popup.draw()
+        for button in popup_buttons:
+            button.draw()
         target_page = str()
         while not target_page:
+            self.clock.tick(self.fps)
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
-                    target_page == KWindow.EXIT
+                    target_page = KWindow.EXIT
+                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    _mpos = pygame.mouse.get_pos()
+                    for button in popup_buttons:
+                        checked, target_page = button.check(_mpos)
+                        if checked:
+                            break
+                    if checked:
+                        continue
             pygame.display.flip()
+        if target_page == KWindow._PREVPAGE:
+            KWindow._PREVPAGE = None
         return target_page
 
     def closing_window(self) -> None:
@@ -972,19 +1057,22 @@ class KWindow():
         )
         pygame.mixer.music.play(loops=0)
         pygame.mixer.music.set_endevent(KWindow.MUSIC_END)
+        self.screen.fill(self.color_bgdf)
         is_staying = True
         while is_staying:
+            self.clock.tick(self.fps)
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     is_staying = False
                 elif event.type == KWindow.MUSIC_END:
                     is_staying = False
+            pygame.display.flip()
 
     def run(self) -> None:
         self.opening_window()
         while self.current_page != KWindow.EXIT:
             self.current_page = eval(
-                "".join(["self.", self.current_page, "()"])
+                str().join(["self.", self.current_page, "()"])
             )
         self.closing_window()
 
