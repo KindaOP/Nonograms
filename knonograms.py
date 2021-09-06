@@ -1,6 +1,11 @@
-from typing import Dict, List
+import pygame
 
-from kobjects import *
+from typing import Tuple, Dict, List
+
+from pygame import mouse
+
+from kauxiliaries import KType, KColor
+from kobjects import KObject, KBlock, KTextBlock, KGrid
 
 
 class KNonograms(KObject):
@@ -8,6 +13,7 @@ class KNonograms(KObject):
     HORIZONTAL = 1
     VERTICAL = 2
     IMAGE = 3
+    CURRENT_MODE = KBlock.EMPTY
 
     def __init__(
         self,
@@ -82,8 +88,8 @@ class KNonograms(KObject):
 
     # Overridden
     def draw_all(self) -> None:
-        for grid in self.grids.values():
-            grid.draw_all()
+        for key, grid in self.grids.items():
+            grid.draw_all(bdin=not key == KNonograms.IMAGE)
 
     def register_h(
         self, 
@@ -129,6 +135,9 @@ class KNonograms(KObject):
                     )
                 ))
 
+    def scm(self, mode:int) -> None:
+        KNonograms.CURRENT_MODE = mode
+
     def record():
         pass
 
@@ -148,6 +157,27 @@ class KNonograms(KObject):
 
     def restart():
         pass
+
+    def check(
+        self, 
+        mouse_position:KType.Pos2D,
+        *args, **kwargs
+        ) -> bool:
+        for key, grid in self.grids.items():
+            if not grid.is_enclosing(mouse_position) or key==KNonograms.IMAGE:
+                return False
+            xi, yi = grid.block_index_at(mouse_position)
+            _g = grid.unit_array[xi][yi]
+            if not _g.clickable:
+                return False
+            _g.state = KNonograms.CURRENT_MODE
+            _g.draw(clr=KColor.name('black'))
+            grid.draw_borders()
+            _gi = self.grids[KNonograms.IMAGE].unit_array[xi][yi]
+            _gi.state = KNonograms.CURRENT_MODE
+            _gi.draw(clr=KColor.name('black'))
+            self.grids[KNonograms.IMAGE].draw_borders(bdin=False)
+            return True
 
     # Overridden
     def copy(): pass

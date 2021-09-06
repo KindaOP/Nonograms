@@ -1,4 +1,4 @@
-from kwindows import *
+from kwindows import KWindow
 
 
 def main():

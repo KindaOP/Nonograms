@@ -1,12 +1,13 @@
+import pygame
 import pygame.draw
 import pygame.font
 import pygame.image
 
 import os
 from PIL import Image
-from typing import Callable, Any
+from typing import Union, Tuple, Callable, Any
 
-from kauxiliaries import *
+from kauxiliaries import KType, KColor
 
 
 class KObject():
@@ -411,6 +412,7 @@ class KButton(KTextBlock):
         self,
         screen:pygame.Surface,
         text:str,
+        font_size:int,
         size:Tuple[int, int],
         position:KType.Pos2D,
         color_text:KColor,
@@ -423,7 +425,7 @@ class KButton(KTextBlock):
         super(KButton, self).__init__(
             screen,
             text,
-            min(size),
+            font_size,
             size,
             position,
             color_text,

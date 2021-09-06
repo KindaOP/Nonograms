@@ -36,7 +36,7 @@ class KWindow():
                     _mpos = pygame.mouse.get_pos()
                     clicked, target_page = back_button.check(_mpos)
                     if clicked:
-                        continue
+                        break
             pygame.display.flip()
         if target_page == "exit_prompt":
             KWindow._PREVPAGE = "new_page"
