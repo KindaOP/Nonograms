@@ -44,7 +44,7 @@ class KWindow():
 
 ```
 
-Then, just add a button in the start_menu() method, make sure the **exact** name of the method is used to set the flag. 
+Then, add a button in the start_menu() method, make sure the **exact** name of the method is used to set the flag. 
 
 ```
 button_to_page = KButton(..., on_pressed = lambda: "new_page")
