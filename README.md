@@ -3,7 +3,7 @@ An apparently-very-simple-but-then-appears-to-be-quite-challenging-and-time-cons
 
 ## Version 1.0.0 
 ### Note (also note to self lol)
-If you wish to add an additional page from the start menu, add it as a method (currently with no extra arguments) in `kwindows.KWindow` class.
+To add an additional page from the start menu, add it as a method (currently with no extra arguments) in `kwindows.KWindow` class.
 
 Here is an example of a minimally functional page
 
