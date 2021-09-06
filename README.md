@@ -37,8 +37,6 @@ class KWindow():
                     clicked, target_page = back_button.check(_mpos)
                     if clicked:
                         continue
-                    # add more codes here
-                # or add more event handlings here
             pygame.display.flip()
         if target_page == "exit_prompt":
             KWindow._PREVPAGE = "new_page"
@@ -49,5 +47,5 @@ class KWindow():
 Then, similarly add a button in the start_menu() method, be sure to use the **exact** name of the method to set the flag. 
 
 ```
-button_to_page = KButton(..., on_pressed = lambda: <method_name>)
+button_to_page = KButton(..., on_pressed = lambda: "new_page")
 ```
