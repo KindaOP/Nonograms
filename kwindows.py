@@ -16,6 +16,7 @@ import random
 import platform
 from typing import Union, Tuple
 
+from kpuzzles import *
 from kauxiliaries import KColor
 from knonograms import KNonograms
 from kobjects import KBlock, KTextBlock, KGrid, KGIF, KButton, KProgressBar
@@ -307,6 +308,7 @@ class KWindow():
             color_mainblocks = KColor.name('white'),
             color_numblocks = KColor.name('yellow')
         )
+        nng.register(____PUZZLE01____)
         back_button = KButton(
                 self.screen,
                 "Back",
@@ -478,7 +480,7 @@ class KWindow():
                         if clicked:
                             break
                     if clicked:
-                        continue
+                        break
             pygame.display.flip()
         if target_page == "exit_prompt":
             KWindow._PREVPAGE = "history"

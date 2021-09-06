@@ -2,11 +2,12 @@ import pygame
 from pygame.colordict import THECOLORS
 
 import random
-from typing import Union, Tuple
+from typing import Union, Tuple, Dict, List
 
 
 class KType():
     Pos2D = Union[Tuple[int, int], pygame.Vector2]
+    Puzzle = Tuple[Dict[int, List[int]], Dict[int, List[int]]]
 
     class Float01(float):
         def __new__(cls, x=1, *args, **kwargs):
