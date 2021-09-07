@@ -16,7 +16,7 @@ import random
 import platform
 from typing import Union, Tuple
 
-from kpuzzles import *
+from kpuzzles import ____PUZZLE01____
 from kauxiliaries import KColor
 from knonograms import KNonograms
 from kobjects import KBlock, KTextBlock, KGrid, KGIF, KButton, KProgressBar
@@ -31,6 +31,7 @@ class KWindow():
     EXIT = 'exit'
     _INITIALIZED = False
     _PREVPAGE = None
+    _PHISTORY = None
     _WINCOUNT = 0
 
     def __init__(
@@ -309,7 +310,8 @@ class KWindow():
             color_numblocks = KColor.name('yellow')
         )
         nng.register(____PUZZLE01____)
-        back_button = KButton(
+        main_buttons = (
+            KButton(
                 self.screen,
                 "Back",
                 50,
@@ -319,7 +321,19 @@ class KWindow():
                 KColor.name('black'),
                 on_pressed = lambda: "start_menu",
                 on_released = None
+            ),
+            KButton(
+                self.screen,
+                "Restart",
+                40,
+                (150, 50),
+                (575, 25),
+                KColor.name('white'),
+                KColor.name('black'),
+                on_pressed = lambda: "restart_prompt",
+                on_released = None
             )
+        )
         control_buttons = (
             KButton(
                 self.screen,
@@ -352,17 +366,6 @@ class KWindow():
                 KColor.name('white'),
                 KColor.name('black'),
                 on_pressed = lambda nng: nng.reset(),
-                on_released = None
-            ),
-            KButton(
-                self.screen,
-                "Restart",
-                40,
-                (150, 50),
-                (575, 25),
-                KColor.name('white'),
-                KColor.name('black'),
-                on_pressed = lambda nng: nng.restart(),
                 on_released = None
             ),
             KButton(
@@ -421,33 +424,104 @@ class KWindow():
                 on_released = None
             )
         )
-        back_button.draw()
+        for mbutton in main_buttons:
+            mbutton.draw()
         for cbutton in control_buttons:
             cbutton.draw()
         nng.draw_all()
+        if KWindow._PHISTORY is not None:
+            nng.history, _tpih = KWindow._PHISTORY
+            KWindow._PHISTORY = None
+            for _ in range(_tpih+1):
+                nng.redo()
         target_page = str()
         while not target_page:
             self.clock.tick(self.fps)
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     target_page = "exit_prompt"
-                    KWindow._PREVPAGE = "start_menu"
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     _mpos = pygame.mouse.get_pos()
-                    checked, target_page = back_button.check(_mpos)
+                    for mbutton in main_buttons:
+                        checked, target_page = mbutton.check(_mpos)
+                        if checked:
+                            break
                     if checked:
                         break
                     for cbutton in control_buttons:
                         checked, _ = cbutton.check(_mpos, nng)
                         if checked:
+                            print(nng.pih)
                             break
                     if checked:
                         break
                     checked = nng.check(_mpos)
+                    print(nng.pih)
                     if checked:
                         break
                         
             pygame.display.flip()
+        if target_page == "exit_prompt":
+            KWindow._PREVPAGE = "start_game"
+            KWindow._PHISTORY = (nng.history, nng.pih)
+        elif target_page == "restart_prompt":
+            popup = KTextBlock(
+                self.screen,
+                "    Restart?    ",
+                90,
+                (450, 250),
+                (0, 0),
+                is_centered = False
+            )
+            popup.set_center(self.screen.get_rect().center)
+            popup.inner_object.rect.move_ip(0, 10)
+            popup_buttons = (
+                KButton(
+                    self.screen,
+                    "Yes",
+                    50,
+                    (150, 50),
+                    popup.get_position() + pygame.Vector2(30, 170),
+                    KColor.name('black'),
+                    KColor.name('white'),
+                    on_pressed = lambda: True,
+                    on_released = None,
+                ),
+                KButton(
+                    self.screen,
+                    "No",
+                    50,
+                    (150, 50),
+                    popup.get_position() + pygame.Vector2(270, 170),
+                    KColor.name('black'),
+                    KColor.name('white'),
+                    on_pressed = lambda: False,
+                    on_released = None
+                )
+            )
+            popup.draw()
+            for button in popup_buttons:
+                button.draw()
+            proceed = None
+            while proceed is None:
+                self.clock.tick(self.fps)
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        proceed = False
+                    elif event.type == pygame.MOUSEBUTTONDOWN:
+                        _mpos = pygame.mouse.get_pos()
+                        for button in popup_buttons:
+                            checked, proceed = button.check(_mpos)
+                            if checked:
+                                break
+                        if checked:
+                            break
+                pygame.display.flip()
+            KWindow._PHISTORY = (
+                nng.history, 
+                nng.pih
+            ) if not proceed else None
+            target_page = "start_game"
         return target_page
 
     def history(self):
@@ -573,7 +647,7 @@ class KWindow():
                         if checked:
                             break
                     if checked:
-                        continue
+                        break
             pygame.display.flip()
         if target_page == KWindow._PREVPAGE:
             KWindow._PREVPAGE = None

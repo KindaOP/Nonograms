@@ -200,7 +200,8 @@ class KBlock(KObject):
                 self.screen,
                 self.color_default if clr is None else clr,
                 _rect.bottomleft,
-                _rect.topright
+                _rect.topright,
+                width = 3
             )
 
     # Overridden

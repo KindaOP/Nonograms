@@ -1,6 +1,6 @@
 import pygame
 
-from typing import Tuple, Dict, List
+from typing import Tuple
 
 from kauxiliaries import KType, KColor
 from kobjects import KObject, KBlock, KTextBlock, KGrid
@@ -97,14 +97,16 @@ class KNonograms(KObject):
         _maxlvl = _g.num_blocks[1] - 1
         for line, nlist in hdict.items():
             for level, num in enumerate(nlist[::-1]):
+                xi, yi = line, _maxlvl-level
                 _g.replace((
-                    (line, _maxlvl-level),
+                    (xi, yi),
                     KTextBlock(
                         _g.screen,
                         str(num),
                         min(_gu.rect.size),
                         _gu.rect.size,
-                        _gu.get_position(),
+                        _g.unit_array[xi][yi].get_position(),
+                        KColor.name('black'),
                         _gu.color_default,
                         clickable = True
                     )
@@ -114,14 +116,16 @@ class KNonograms(KObject):
         _maxlvl = _g.num_blocks[0] - 1
         for line, nlist in vdict.items():
             for level, num in enumerate(nlist[::-1]):
+                xi, yi = _maxlvl-level, line
                 _g.replace((
-                    (_maxlvl-level, line),
+                    (xi, yi),
                     KTextBlock(
                         _g.screen,
                         str(num),
                         min(_gu.rect.size),
                         _gu.rect.size,
-                        _gu.get_position(),
+                        _g.unit_array[xi][yi].get_position(),
+                        KColor.name('black'),
                         _gu.color_default,
                         clickable = True
                     )
@@ -130,23 +134,46 @@ class KNonograms(KObject):
     def scm(self, mode:int) -> None:
         KNonograms.CURRENT_MODE = mode
 
-    def reset(self) -> None:
+    def _clear(self) -> None:
         for key, grid in self.grids.items():
             _hnum, _vnum = grid.num_blocks
             for c in range(_hnum):
                 for r in range(_vnum):
                     grid.unit_array[c][r].state = KBlock.EMPTY
             grid.draw_all(bdin=not key==KNonograms.IMAGE)
-        self.history = list()
+
+    def reset(self) -> None:
+        self._clear()
+        if self.pih != len(self.history)-1:
+            self.history = self.history[:self.pih+1] 
+        self.history.append(self.pih)
+        self.pih += 1
 
     def undo(self) -> None:
         if self.pih >= 0:
-            key, (xi, yi), (state, _) = self.history[self.pih]
+            _history = self.history[self.pih]
+            if type(_history) is int:
+                self._clear()
+                for _tpih in range(_history+1):
+                    print(_tpih)
+                    key, (xi, yi), (_, state) = self.history[_tpih]
+                    _g = self.grids[key].unit_array[xi][yi]
+                    _g.state = state
+                    _g.draw(clr=KColor.name('black'))
+                    self.grids[key].draw_borders()
+                    if key == KNonograms.MAIN:
+                        _gi = self.grids[KNonograms.IMAGE].unit_array[xi][yi]
+                        _gi.state = state
+                        _gi.draw(clr=KColor.name('black'))
+                        self.grids[KNonograms.IMAGE].draw_borders(bdin=False)
+                self.pih -= 1
+                return
+            key, (xi, yi), (state, _) = _history
             _g = self.grids[key].unit_array[xi][yi]
             _g.state = state
             _g.draw(clr=KColor.name('black'))
             self.grids[key].draw_borders()
-            if key == KNonograms.IMAGE:
+            if key == KNonograms.MAIN:
                 _gi = self.grids[KNonograms.IMAGE].unit_array[xi][yi]
                 _gi.state = state
                 _gi.draw(clr=KColor.name('black'))
@@ -155,12 +182,17 @@ class KNonograms(KObject):
 
     def redo(self) -> None:
         if self.pih+1 < len(self.history):
-            key, (xi, yi), (_, state) = self.history[self.pih+1]
+            _history = self.history[self.pih+1]
+            if type(_history) is int:
+                self._clear()
+                self.pih += 1
+                return
+            key, (xi, yi), (_, state) = _history
             _g = self.grids[key].unit_array[xi][yi]
             _g.state = state
             _g.draw(clr=KColor.name('black'))
             self.grids[key].draw_borders()
-            if key == KNonograms.IMAGE:
+            if key == KNonograms.MAIN:
                 _gi = self.grids[KNonograms.IMAGE].unit_array[xi][yi]
                 _gi.state = state
                 _gi.draw(clr=KColor.name('black'))
@@ -175,27 +207,35 @@ class KNonograms(KObject):
         mouse_position:KType.Pos2D,
         *args, **kwargs
         ) -> bool:
+        if not self.is_enclosing(mouse_position):
+            return False
         for key, grid in self.grids.items():
             if not grid.is_enclosing(mouse_position) or key==KNonograms.IMAGE:
-                return False
+                continue
             xi, yi = ind = grid.block_index_at(mouse_position)
             _g = grid.unit_array[xi][yi]
             if not _g.clickable:
                 return False
             _state = _g.state
-            _g.state = KNonograms.CURRENT_MODE
-            _g.draw(clr=KColor.name('black'))
-            grid.draw_borders()
-            if key == KNonograms.IMAGE:
-                _gi = self.grids[KNonograms.IMAGE].unit_array[xi][yi]
-                _gi.state = KNonograms.CURRENT_MODE
+            if key == KNonograms.MAIN:
+                _g.state = KNonograms.CURRENT_MODE
+                _g.draw(clr=KColor.name('black'))
+                grid.draw_borders()
+                gridi = self.grids[KNonograms.IMAGE]
+                _gi = gridi.unit_array[xi][yi]
+                _gi.state = _g.state if _g.state==KBlock.FILLED else KBlock.EMPTY
                 _gi.draw(clr=KColor.name('black'))
-                self.grids[KNonograms.IMAGE].draw_borders(bdin=False)
+                gridi.draw_borders(bdin=False)
+            else:
+                _g.state = KBlock.CROSSED if _g.state==KBlock.EMPTY else KBlock.EMPTY
+                _g.draw(clr=KColor.name('black'))
+                grid.draw_borders()
             if self.pih != len(self.history)-1:
                 self.history = self.history[:self.pih+1] 
             self.history.append((key, ind, (_state, _g.state)))
             self.pih += 1
             return True
+        return False
 
     # Overridden
     def copy(): pass
